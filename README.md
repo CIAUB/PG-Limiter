@@ -7,11 +7,11 @@
 <img src="https://readme-typing-svg.demolab.com?font=Fira+Code&size=20&pause=1000&color=8B0000&center=true&vCenter=true&width=500&lines=Sharingan-sharp+IP+Tracking;Real--time+SSE+Log+Streaming;Telegram+%2B+CLI+%2B+REST+API;Redis--cached%2C+Battle--tested" alt="Typing SVG" />
 
 ![Python](https://img.shields.io/badge/Python-3.10+-8B0000?logo=python&logoColor=white)
-![License](https://img.shields.io/badge/License-AGPL--3.0-8B0000)
-![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-8B0000)
-![Version](https://img.shields.io/badge/Version-1.0.0-8B0000)
+![License](https://img.shields.io/badge/License-AGPL--3.0-3d3d3d)
+![Platform](https://img.shields.io/badge/Platform-Linux%20%7C%20macOS-3d3d3d)
+![Version](https://img.shields.io/badge/Version-1.0.0-3d3d3d)
 ![PasarGuard](https://img.shields.io/badge/PasarGuard-5.3.0%2B-8B0000)
-![Docker](https://img.shields.io/badge/Docker-Supported-8B0000)
+![Docker](https://img.shields.io/badge/Docker-Supported-3d3d3d)
 ![Redis](https://img.shields.io/badge/Redis-Optional-8B0000)
 
 Monitor • Limit • Warn • Recover — Telegram Bot • CLI • REST API • Web Dashboard
@@ -179,7 +179,7 @@ Redis (optional, but recommended for production)
 ### Quick Install with Docker (Recommended)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/MatinDehghanian/PG-Limiter/main/pg-limiter.sh -o /tmp/pg-limiter.sh
+curl -sSL https://raw.githubusercontent.com/CIAUB/PG-Limiter/main/pg-limiter.sh -o /tmp/pg-limiter.sh
 sudo bash /tmp/pg-limiter.sh install
 ```
 
@@ -210,7 +210,7 @@ pg-limiter uninstall  # Remove PG-Limiter
 ### Manual Installation (Without Docker)
 
 ```bash
-git clone https://github.com/MatinDehghanian/PG-Limiter.git
+git clone https://github.com/CIAUB/PG-Limiter.git
 cd PG-Limiter
 
 pip install -r requirements.txt
@@ -617,7 +617,7 @@ After timeout (or manual enable) → Original groups restored
 ```yaml
 services:
   pg-limiter:
-    image: ghcr.io/matindehghanian/pg-limiter:latest
+    image: ghcr.io/ciaub/pg-limiter:latest
     depends_on:
       - redis
     environment:
