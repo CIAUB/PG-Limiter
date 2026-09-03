@@ -871,9 +871,23 @@ async def check_users_usage(panel_data: PanelType):
 
 
 async def run_check_users_usage(panel_data: PanelType) -> None:
-    """run check_ip_used() function and then run check_users_usage()"""
+    """run check_ip_used() function and then run check_users_usage()
+
+    Reads the polling interval from the canonical config key. We
+    previously read `data["monitoring"]["check_interval"]` directly,
+    which silently disagreed with the CLI's
+    `data["timing"]["check_interval"]` and let the two fall out of
+    sync. The shared `get_config_value` helper now resolves the
+    interval whether it lives at the top level, under `monitoring`,
+    or under `timing`.
+    """
     while True:
         await check_users_usage(panel_data)
         data = await read_config()
-        check_interval = data.get("monitoring", {}).get("check_interval", 60)
-        await asyncio.sleep(int(check_interval))
+        # `get_config_value` knows the canonical key + every legacy alias.
+        interval = get_config_value(data, "CHECK_INTERVAL", default=60)
+        try:
+            check_interval = int(interval)
+        except (TypeError, ValueError):
+            check_interval = 60
+        await asyncio.sleep(check_interval)

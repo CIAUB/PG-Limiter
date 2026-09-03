@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<!--
+  PG-Limiter Dashboard
+  # Modified/Added by CIAUB, 2026-09-03 — part of PasarGuard 5.3.0+
+  # compatibility fork.
+  # Licensed under AGPLv3 — see LICENSE.
+  # AGPL §13 source-link notice: the dashboard is an interactive
+  # network service; remote users must be able to access the
+  # corresponding source. The footer below carries a "Source Code"
+  # link to https://github.com/CIAUB/PG-Limiter.
+
+  Single-file, dependency-free. Polls /api/dashboard/state every 5 s
+  and renders the response into a card grid. All styling is inline
+  to keep the file portable (no static file mount, no CDN).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PG-Limiter Dashboard</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #0f1419;
+    --card: #1a1f29;
+    --border: #2a2f3a;
+    --fg: #e6e6e6;
+    --muted: #8a8a8a;
+    --accent: #4ec9b0;
+    --warn: #d7ba7d;
+    --err: #f48771;
+    --ok: #4ec9b0;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg); color: var(--fg);
+    min-height: 100vh;
+  }
+  header {
+    padding: 18px 24px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--card);
+  }
+  header h1 {
+    margin: 0; font-size: 18px; font-weight: 600;
+  }
+  header .meta { font-size: 12px; color: var(--muted); }
+  .status-dot {
+    display: inline-block; width: 8px; height: 8px; border-radius: 50%;
+    margin-right: 6px; vertical-align: middle;
+    background: var(--muted);
+  }
+  .status-dot.ok    { background: var(--ok); }
+  .status-dot.warn  { background: var(--warn); }
+  .status-dot.err   { background: var(--err); animation: pulse 1.5s infinite; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  main {
+    padding: 24px;
+    display: grid; gap: 16px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    max-width: 1200px; margin: 0 auto;
+  }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+  }
+  .card h2 {
+    margin: 0 0 8px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 600;
+  }
+  .card .value {
+    font-size: 28px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .card .sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .card.wide { grid-column: span 2; }
+  table {
+    width: 100%; border-collapse: collapse; font-size: 13px;
+  }
+  table th, table td {
+    text-align: left; padding: 6px 8px;
+    border-bottom: 1px solid var(--border);
+  }
+  table th { color: var(--muted); font-weight: 500; }
+  code {
+    font-family: "SFMono-Regular", Consolas, monospace;
+    background: rgba(255,255,255,0.04);
+    padding: 1px 6px; border-radius: 3px;
+    font-size: 12px;
+  }
+  .pill {
+    display: inline-block; padding: 2px 8px; border-radius: 999px;
+    font-size: 11px; font-weight: 500;
+    background: rgba(78, 201, 176, 0.15); color: var(--accent);
+  }
+  .pill.warn { background: rgba(215, 186, 125, 0.15); color: var(--warn); }
+  .pill.err  { background: rgba(244, 135, 113, 0.15); color: var(--err); }
+  footer {
+    text-align: center; padding: 16px;
+    color: var(--muted); font-size: 11px;
+  }
+  footer a {
+    color: var(--accent);
+    text-decoration: none;
+    margin: 0 6px;
+  }
+  footer a:hover { text-decoration: underline; }
+  .error-msg { color: var(--err); font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>🛡️ PG-Limiter</h1>
+  <div class="meta">
+    <span id="dot" class="status-dot"></span>
+    <span id="panel">…</span>
+    · <span id="auth">…</span>
+    · <span id="updated">never</span>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <h2>Disabled Users</h2>
+    <div class="value" id="c-disabled">–</div>
+    <div class="sub">Currently in disabled list</div>
+  </div>
+  <div class="card">
+    <h2>Special Limits</h2>
+    <div class="value" id="c-special">–</div>
+    <div class="sub">Per-user custom IP limits</div>
+  </div>
+  <div class="card">
+    <h2>Except Users</h2>
+    <div class="value" id="c-except">–</div>
+    <div class="sub">Excluded from limiting</div>
+  </div>
+  <div class="card">
+    <h2>General Limit</h2>
+    <div class="value" id="c-general">–</div>
+    <div class="sub">Default IP cap per user</div>
+  </div>
+  <div class="card">
+    <h2>Check Interval</h2>
+    <div class="value" id="c-interval">–</div>
+    <div class="sub">Seconds between cycles</div>
+  </div>
+  <div class="card">
+    <h2>Country Filter</h2>
+    <div class="value" id="c-country">–</div>
+    <div class="sub">ISO-2 country code or empty</div>
+  </div>
+  <div class="card wide">
+    <h2>Panel Health</h2>
+    <table>
+      <tbody>
+        <tr><th>Available</th><td id="h-available">…</td></tr>
+        <tr><th>Consecutive failures</th><td id="h-failures">…</td></tr>
+        <tr><th>Preferred scheme</th><td id="h-scheme">…</td></tr>
+        <tr><th>HTTPS failures</th><td id="h-https">…</td></tr>
+        <tr><th>HTTP failures</th><td id="h-http">…</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="card wide">
+    <h2>Quick API</h2>
+    <table>
+      <tbody>
+        <tr><th>Status</th><td><code>GET /status</code></td></tr>
+        <tr><th>Limits</th><td><code>GET /users/limits</code></td></tr>
+        <tr><th>Disabled</th><td><code>GET /users/disabled</code></td></tr>
+        <tr><th>Bulk disable</th><td><code>POST /users/bulk/disable</code></td></tr>
+        <tr><th>Bulk enable</th><td><code>POST /users/bulk/enable</code></td></tr>
+        <tr><th>Cleanup</th><td><code>POST /cleanup</code></td></tr>
+        <tr><th>OpenAPI docs</th><td><code>GET /docs</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+</main>
+
+<footer>
+  Polls <code>/api/dashboard/state</code> every 5 s ·
+  Auth: HTTP Basic (same as the rest of the API)
+  <br>
+  PG-Limiter is licensed under
+  <a href="https://www.gnu.org/licenses/agpl-3.0.html" rel="license">AGPLv3</a>.
+  <a href="https://github.com/CIAUB/PG-Limiter" rel="source">Source Code</a> ·
+  <a href="https://github.com/MatinDehghanian/PG-Limiter">Upstream</a> ·
+  <a href="https://github.com/CIAUB/PG-Limiter/blob/main/NOTICE.md">Credits</a>
+</footer>
+
+<script>
+  const fmt = (n) => (n === null || n === undefined) ? "–" : String(n);
+  const el = (id) => document.getElementById(id);
+
+  function setClass(id, cls) {
+    const e = el(id);
+    e.className = "status-dot " + (cls || "");
+  }
+
+  function render(state) {
+    el("panel").textContent = state.panel_domain || "no panel";
+    el("auth").innerHTML = state.auth_mode === "api_key"
+      ? '<span class="pill">api_key</span>'
+      : '<span class="pill warn">password</span>';
+
+    el("updated").textContent = "updated " + (state.generated_at || "?");
+
+    const c = state.counts || {};
+    el("c-disabled").textContent = fmt(c.disabled_users);
+    el("c-special").textContent   = fmt(c.special_limits);
+    el("c-except").textContent    = fmt(c.except_users);
+
+    const cfg = state.config || {};
+    el("c-general").textContent   = fmt(cfg.general_limit);
+    el("c-interval").textContent  = fmt(cfg.check_interval) + "s";
+    el("c-country").textContent   = cfg.country_code
+      ? cfg.country_code
+      : "—";
+
+    const h = state.health || {};
+    el("h-available").innerHTML = h.panel_available
+      ? '<span class="pill">up</span>'
+      : '<span class="pill err">down</span>';
+    el("h-failures").textContent = fmt(h.consecutive_failures);
+    el("h-scheme").textContent   = fmt(h.preferred_scheme);
+    el("h-https").textContent    = fmt((h.https || {}).failures);
+    el("h-http").textContent     = fmt((h.http || {}).failures);
+
+    setClass("dot", h.panel_available ? "ok" : "err");
+  }
+
+  async function poll() {
+    try {
+      const r = await fetch("/api/dashboard/state", { cache: "no-store" });
+      if (!r.ok) {
+        setClass("dot", "err");
+        el("updated").textContent = "error " + r.status;
+        return;
+      }
+      const data = await r.json();
+      render(data);
+    } catch (e) {
+      setClass("dot", "err");
+      el("updated").textContent = "fetch failed";
+    }
+  }
+
+  poll();
+  setInterval(poll, 5000);
+</script>
+</body>
+</html>

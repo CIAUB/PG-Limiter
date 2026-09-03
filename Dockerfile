@@ -43,8 +43,12 @@ ENV PYTHONUNBUFFERED=1
 ENV DATABASE_URL=sqlite+aiosqlite:////var/lib/pg-limiter/data/pg_limiter.db
 
 # Labels
-LABEL org.opencontainers.image.source="https://github.com/MatinDehghanian/PG-Limiter"
-LABEL org.opencontainers.image.description="IP Limiter for PasarGuard Panel"
-LABEL maintainer="MatinDehghanian"
+LABEL org.opencontainers.image.source="https://github.com/CIAUB/PG-Limiter"
+LABEL org.opencontainers.image.source.upstream="https://github.com/MatinDehghanian/PG-Limiter"
+LABEL org.opencontainers.image.description="IP Limiter for PasarGuard Panel (CIAUB fork of MatinDehghanian/PG-Limiter)"
+LABEL org.opencontainers.image.licenses="AGPL-3.0"
+LABEL maintainer="CIAUB <https://github.com/CIAUB>"
+LABEL org.opencontainers.image.authors="CIAUB"
+LABEL org.opencontainers.image.authors.original="MatinDehghanian"
 
 ENTRYPOINT ["/app/start.sh"]

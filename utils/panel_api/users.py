@@ -15,6 +15,8 @@ from utils.logs import logger, log_api_request, log_user_action, get_logger
 from utils.read_config import read_config
 from utils.types import PanelType, UserType
 from utils.panel_api.auth import get_token, invalidate_token_cache, safe_send_logs_panel
+from utils.panel_api._models import UsersSimpleResponse
+from utils.panel_api.request_helper import panel_get
 
 # Module logger
 users_logger = get_logger("panel_api.users")
@@ -184,6 +186,108 @@ async def all_user(panel_data: PanelType) -> list[UserType] | ValueError:
     await safe_send_logs_panel(message)
     users_logger.error(message)
     raise ValueError(message)
+
+
+async def get_users_simple(
+    panel_data: PanelType,
+    *,
+    usernames: list[str] | None = None,
+    admin: list[str] | None = None,
+    search: str | None = None,
+    timeout: float = 30.0,
+) -> list[str] | ValueError:
+    """
+    Fetch a lightweight list of usernames from `/api/users/simple`.
+
+    This endpoint is much cheaper than `/api/users` (returns only
+    `id` and `username` per user) and is the recommended way to
+    enumerate the panel population when full user details aren't needed
+    (e.g., cache invalidation, deletion detection, bulk checks).
+
+    Args:
+        panel_data: Panel connection info.
+        usernames:  Optional list of usernames to look up
+                    (becomes `?usernames=a&usernames=b`).
+        admin:      Optional list of admin usernames to filter by.
+        search:     Optional substring search.
+        timeout:    Per-request timeout in seconds.
+
+    Returns:
+        list[str] of usernames (deduplicated, order preserved).
+
+    Raises:
+        ValueError: If the panel call fails after retries and no
+                    partial result was collected.
+    """
+    users_logger.debug("📋 Fetching users via /api/users/simple...")
+    max_attempts = 3
+    page_size = 500
+
+    collected: list[str] = []
+    seen: set[str] = set()
+    offset = 0
+
+    for attempt in range(max_attempts):
+        while True:
+            params = [f"offset={offset}", f"limit={page_size}"]
+            if usernames:
+                for u in usernames:
+                    params.append(f"usernames={u}")
+            if admin:
+                for a in admin:
+                    params.append(f"admin={a}")
+            if search:
+                params.append(f"search={search}")
+            endpoint = f"/api/users/simple?{'&'.join(params)}"
+
+            response = await panel_get(
+                panel_data, endpoint, timeout=timeout, max_retries=2
+            )
+            if response is None:
+                users_logger.warning(
+                    f"/api/users/simple call failed (offset={offset}, attempt={attempt+1})"
+                )
+                break
+            if response.status_code == 401:
+                await invalidate_token_cache()
+                continue
+            if response.status_code >= 400:
+                users_logger.warning(
+                    f"/api/users/simple returned {response.status_code}: {response.text[:120]}"
+                )
+                break
+
+            try:
+                parsed = UsersSimpleResponse.from_json(response.json())
+            except Exception as exc:  # noqa: BLE001
+                users_logger.error(f"Failed to parse /api/users/simple: {exc}")
+                break
+
+            if not parsed.users:
+                users_logger.info(f"📋 /api/users/simple returned {len(collected)} users")
+                return collected
+
+            for u in parsed.users:
+                if u.username not in seen:
+                    seen.add(u.username)
+                    collected.append(u.username)
+
+            if len(parsed.users) < page_size:
+                users_logger.info(f"📋 /api/users/simple returned {len(collected)} users")
+                return collected
+
+            offset += page_size
+
+        if attempt < max_attempts - 1:
+            wait_time = min(10, random.randint(1, 3) * (attempt + 1))
+            await asyncio.sleep(wait_time)
+
+    if collected:
+        users_logger.warning(
+            f"/api/users/simple returned {len(collected)} users after retries (incomplete)"
+        )
+        return collected
+    raise ValueError("Failed to fetch users via /api/users/simple")
 
 
 async def get_all_panel_users(

@@ -32,6 +32,7 @@ import cli.user
 import cli.except_user
 import cli.disabled
 import cli.config
+import cli.bulk
 
 
 # ASCII art banner
@@ -54,6 +55,7 @@ app.add_typer(cli.user.app, name="user", help="Manage user special limits")
 app.add_typer(cli.except_user.app, name="except", help="Manage except (whitelisted) users")
 app.add_typer(cli.disabled.app, name="disabled", help="Manage disabled users")
 app.add_typer(cli.config.app, name="config", help="Manage configuration")
+app.add_typer(cli.bulk.app, name="bulk", help="Bulk enable/disable users via the panel API")
 
 
 # Hidden completion app

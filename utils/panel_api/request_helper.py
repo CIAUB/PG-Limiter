@@ -6,6 +6,11 @@ This module provides a unified way to make panel API requests with:
 - Fallback between HTTPS and HTTP
 - Token refresh on 401 errors
 - Proper error logging
+- Optional API-key authentication (PasarGuard v5+)
+
+The HTTP client itself comes from `utils.panel_api._connection` so that
+all panel calls share a single connection pool (HTTP/1.1 keepalive, or
+HTTP/2 if `HTTP2_ENABLED=true`).
 """
 
 import asyncio
@@ -17,7 +22,14 @@ import httpx
 
 from utils.logs import log_api_request, get_logger
 from utils.types import PanelType
-from utils.panel_api.auth import get_token, invalidate_token_cache
+from utils.panel_api.auth import (
+    get_token,
+    invalidate_token_cache,
+    has_api_key,
+    get_auth_headers,
+)
+from utils.panel_api._connection import get_panel_client
+from utils.panel_api._retry import parse_retry_after
 
 # Module logger
 request_logger = get_logger("panel_api.request")
@@ -162,97 +174,116 @@ async def panel_request(
 ) -> tuple[Optional[httpx.Response], Optional[str]]:
     """
     Make a panel API request with automatic retry and scheme fallback.
-    
+
+    The shared `httpx.AsyncClient` from `utils.panel_api._connection` is
+    used so we benefit from connection pooling across calls. Each call
+    overrides the per-request `timeout` (httpx supports this on a
+    per-request basis via the `timeout=` kwarg).
+
+    When `panel_data` carries an API key, the bearer token is replaced
+    with the `X-Api-Key` / `ApiKey` headers PasarGuard v5+ expects.
+
     Args:
         panel_data: Panel connection data
         method: HTTP method
         endpoint: API endpoint (e.g., "/api/users")
-        token: Bearer token for authorization
+        token: Bearer token (or API key) for authorization
         json_data: JSON body for POST/PUT requests
         form_data: Form data for POST requests
         timeout: Request timeout in seconds
         max_retries: Maximum number of retry attempts
         retry_delay: Initial delay between retries (doubles each retry)
-    
+
     Returns:
         Tuple of (response, error_message)
         - On success: (response, None)
         - On failure: (None, error_message)
     """
-    headers = {"Authorization": f"Bearer {token}"}
+    # Build auth headers. If the panel_data carries an API key we
+    # always send the API-key headers (so a stale `token` from a
+    # previous login attempt is harmless).
+    if has_api_key(panel_data):
+        api_key = getattr(panel_data, "panel_api_key", None) or token
+        headers = get_auth_headers(api_key)
+    else:
+        headers = {"Authorization": f"Bearer {token}"}
     last_error = None
-    
+
     for attempt in range(max_retries):
         schemes = _get_scheme_order()
-        
+
         for scheme in schemes:
             url = f"{scheme}://{panel_data.panel_domain}{endpoint}"
             start_time = time.perf_counter()
-            
+
+            # Reuse the shared client so we get connection pooling,
+            # keep-alive, and HTTP/2 if enabled.
+            client = get_panel_client()
             try:
-                async with httpx.AsyncClient(verify=False, timeout=timeout) as client:
-                    if method == "GET":
-                        response = await client.get(url, headers=headers)
-                    elif method == "POST":
-                        if form_data:
-                            response = await client.post(url, headers=headers, data=form_data)
-                        else:
-                            response = await client.post(url, headers=headers, json=json_data)
-                    elif method == "PUT":
-                        response = await client.put(url, headers=headers, json=json_data)
-                    elif method == "DELETE":
-                        response = await client.delete(url, headers=headers)
+                if method == "GET":
+                    response = await client.get(url, headers=headers, timeout=timeout)
+                elif method == "POST":
+                    if form_data:
+                        response = await client.post(url, headers=headers, data=form_data, timeout=timeout)
                     else:
-                        response = await client.request(method, url, headers=headers, json=json_data)
-                    
-                    elapsed = (time.perf_counter() - start_time) * 1000
-                    log_api_request(method, url, response.status_code, elapsed)
-                    
-                    # Any response means panel is reachable
-                    _record_connection_success()
-                    
-                    # Success
-                    if response.status_code in (200, 201, 204):
-                        _record_success(scheme)
-                        return response, None
-                    
-                    # Auth error - caller should refresh token
-                    if response.status_code == 401:
-                        _record_failure(scheme)
-                        return response, "Unauthorized - token may be expired"
-                    
-                    # Not found
-                    if response.status_code == 404:
-                        _record_success(scheme)  # Server responded, just not found
-                        return response, None
-                    
-                    # Rate limited
-                    if response.status_code == 429:
-                        _record_failure(scheme)
-                        _record_failure(scheme)  # Double penalty for rate limit
-                        last_error = f"Rate limited (429) on {url}"
-                        request_logger.warning(last_error)
-                        await asyncio.sleep(retry_delay * 2)
-                        continue
-                    
-                    # Server error - retry
-                    if response.status_code >= 500:
-                        _record_failure(scheme)
-                        last_error = f"Server error ({response.status_code}) on {url}"
-                        request_logger.warning(last_error)
-                        continue
-                    
-                    # Other errors
+                        response = await client.post(url, headers=headers, json=json_data, timeout=timeout)
+                elif method == "PUT":
+                    response = await client.put(url, headers=headers, json=json_data, timeout=timeout)
+                elif method == "DELETE":
+                    response = await client.delete(url, headers=headers, timeout=timeout)
+                else:
+                    response = await client.request(method, url, headers=headers, json=json_data, timeout=timeout)
+
+                elapsed = (time.perf_counter() - start_time) * 1000
+                log_api_request(method, url, response.status_code, elapsed)
+
+                # Any response means panel is reachable
+                _record_connection_success()
+
+                # Success
+                if response.status_code in (200, 201, 204):
+                    _record_success(scheme)
+                    return response, None
+
+                # Auth error - caller should refresh token
+                if response.status_code == 401:
                     _record_failure(scheme)
-                    last_error = f"HTTP {response.status_code}: {response.text[:100]}"
-                    
+                    return response, "Unauthorized - token may be expired"
+
+                # Not found
+                if response.status_code == 404:
+                    _record_success(scheme)  # Server responded, just not found
+                    return response, None
+
+                # Rate limited
+                if response.status_code == 429:
+                    _record_failure(scheme)
+                    _record_failure(scheme)  # Double penalty for rate limit
+                    last_error = f"Rate limited (429) on {url}"
+                    request_logger.warning(last_error)
+                    # Honour any Retry-After header sent by the panel.
+                    retry_after = parse_retry_after(response.headers.get("Retry-After"), retry_delay * 2)
+                    await asyncio.sleep(retry_after)
+                    continue
+
+                # Server error - retry
+                if response.status_code >= 500:
+                    _record_failure(scheme)
+                    last_error = f"Server error ({response.status_code}) on {url}"
+                    request_logger.warning(last_error)
+                    continue
+
+                # Other errors
+                _record_failure(scheme)
+                last_error = f"HTTP {response.status_code}: {response.text[:100]}"
+
             except SSLError as e:
                 elapsed = (time.perf_counter() - start_time) * 1000
                 log_api_request(method, url, None, elapsed, f"SSL Error")
                 _record_failure(scheme)
                 last_error = f"SSL Error on {url}: {str(e)[:50]}"
                 continue
-                
+
             except httpx.TimeoutException:
                 elapsed = (time.perf_counter() - start_time) * 1000
                 log_api_request(method, url, None, elapsed, "Timeout")
@@ -262,7 +293,7 @@ async def panel_request(
                 last_error = f"Timeout on {url}"
                 request_logger.warning(last_error)
                 continue
-                
+
             except httpx.ConnectError as e:
                 elapsed = (time.perf_counter() - start_time) * 1000
                 log_api_request(method, url, None, elapsed, "Connection Error")
@@ -270,7 +301,7 @@ async def panel_request(
                 _record_connection_failure()  # Track for panel availability
                 last_error = f"Connection error on {url}: {str(e)[:50]}"
                 continue
-                
+
             except Exception as e:
                 elapsed = (time.perf_counter() - start_time) * 1000
                 log_api_request(method, url, None, elapsed, str(e)[:50])
@@ -278,13 +309,13 @@ async def panel_request(
                 last_error = f"Error on {url}: {type(e).__name__}: {str(e)[:50]}"
                 request_logger.error(last_error)
                 continue
-        
+
         # All schemes failed for this attempt, wait before retry
         if attempt < max_retries - 1:
             wait_time = retry_delay * (2 ** attempt)
             request_logger.debug(f"Retrying in {wait_time:.1f}s (attempt {attempt + 1}/{max_retries})")
             await asyncio.sleep(wait_time)
-    
+
     return None, last_error or "All attempts failed"
 
 

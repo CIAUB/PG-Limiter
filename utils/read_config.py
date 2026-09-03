@@ -91,6 +91,12 @@ def load_env_config() -> Dict[str, Any]:
             "domain": _get_env("PANEL_DOMAIN", ""),
             "username": _get_env("PANEL_USERNAME", "admin"),
             "password": _get_env("PANEL_PASSWORD", ""),
+            # PasarGuard v5+ API key (`pg_key_<uuid>`). When set, this
+            # takes precedence over username/password for auth.
+            "api_key": _get_env("PANEL_API_KEY", ""),
+            # Optional scheme override ("https" / "http"). When empty,
+            # the request helper falls back between both automatically.
+            "scheme": _get_env("PANEL_SCHEME", ""),
         },
         # Telegram settings (from ENV only)
         "telegram": {
@@ -104,7 +110,19 @@ def load_env_config() -> Dict[str, Any]:
         },
         "except_users": [],  # Loaded from DB
         # Monitoring settings (from ENV)
+        #
+        # The codebase historically read `monitoring.check_interval` in
+        # the main loop while the CLI/JSON legacy config used
+        # `timing.check_interval`. We now keep the value in one place
+        # (`check_interval`) and expose `monitoring.check_interval` +
+        # `timing.check_interval` as aliases for backward compat.
         "check_interval": _get_env("CHECK_INTERVAL", 60, int),
+        "monitoring": {
+            "check_interval": _get_env("CHECK_INTERVAL", 60, int),
+        },
+        "timing": {
+            "check_interval": _get_env("CHECK_INTERVAL", 60, int),
+        },
         "time_to_active_users": _get_env("TIME_TO_ACTIVE_USERS", 900, int),
         "country_code": _get_env("COUNTRY_CODE", ""),
         # User sync settings
@@ -116,6 +134,13 @@ def load_env_config() -> Dict[str, Any]:
             "port": _get_env("API_PORT", 8080, int),
             "username": _get_env("API_USERNAME", "admin"),
             "password": _get_env("API_PASSWORD", ""),
+        },
+        # HTTP client tuning (NEW)
+        "http": {
+            "pool_size": _get_env("HTTP_POOL_SIZE", 100, int),
+            "http2_enabled": _get_env("HTTP2_ENABLED", False, bool),
+            "request_timeout": _get_env("PANEL_REQUEST_TIMEOUT", 30.0, float),
+            "insecure": _get_env("PANEL_INSECURE", False, bool),
         },
         # Database
         "database_url": _get_env(
@@ -335,13 +360,21 @@ async def read_config(check_required_elements: bool = False) -> Dict[str, Any]:
             config["user_sync_interval"] = int(db_config["user_sync_interval"])
         except (ValueError, TypeError):
             pass
-    
+
+    # Allow either PANEL_API_KEY (env) or a panel_api_key entry in the
+    # DB to take effect. Env wins if both are set.
+    if not config["panel"].get("api_key"):
+        config["panel"]["api_key"] = db_config.get("panel_api_key", "") or ""
+
     # Validate required elements
     if check_required_elements:
         if not config["panel"]["domain"]:
             raise ValueError("PANEL_DOMAIN is not set in environment")
-        if not config["panel"]["password"]:
-            raise ValueError("PANEL_PASSWORD is not set in environment")
+        # We now accept EITHER a password OR an API key for auth.
+        if not config["panel"].get("password") and not config["panel"].get("api_key"):
+            raise ValueError(
+                "Either PANEL_PASSWORD or PANEL_API_KEY must be set in environment"
+            )
         if not config["telegram"]["bot_token"]:
             raise ValueError("BOT_TOKEN is not set in environment")
         if not config["telegram"]["admins"]:

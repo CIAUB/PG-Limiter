@@ -2,17 +2,20 @@
 set -e
 
 # PG-Limiter Management Script
-# https://github.com/MatinDehghanian/PG-Limiter
+# Fork maintained by CIAUB <https://github.com/CIAUB>
+# Upstream: https://github.com/MatinDehghanian/PG-Limiter (MatinDehghanian)
 
-VERSION="0.9.8"
+VERSION="1.0.0"
 
 # Configuration
-REPO_OWNER="MatinDehghanian"
+# This fork is maintained by CIAUB. To install the original upstream
+# instead, set REPO_OWNER=MatinDehghanian in your environment.
+REPO_OWNER="${REPO_OWNER:-CIAUB}"
 REPO_NAME="PG-Limiter"
 SERVICE_NAME="pg-limiter"
 CONFIG_DIR="/etc/opt/pg-limiter"
 DATA_DIR="/var/lib/pg-limiter"
-DOCKER_IMAGE="ghcr.io/matindehghanian/pg-limiter:latest"
+DOCKER_IMAGE="${DOCKER_IMAGE:-ghcr.io/ciaub/pg-limiter:latest}"
 COMPOSE_FILE="$CONFIG_DIR/docker-compose.yml"
 ENV_FILE="$CONFIG_DIR/.env"
 SCRIPT_URL="https://raw.githubusercontent.com/$REPO_OWNER/$REPO_NAME/main/pg-limiter.sh"

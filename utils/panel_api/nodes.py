@@ -8,6 +8,7 @@ from utils.logs import get_logger
 from utils.types import PanelType, NodeType
 from utils.panel_api.auth import safe_send_logs_panel
 from utils.panel_api.request_helper import panel_get
+from utils.panel_api._models import NodesResponse, NodeResponse as _NodeResponseModel
 
 # Try to import Redis cache
 try:
@@ -184,5 +185,53 @@ async def get_nodes(
     nodes_logger.info(f"🖥️ Fetched {len(all_nodes)} nodes (cached for 1 hour)")
     for node in all_nodes:
         nodes_logger.debug(f"  └─ {node.node_name} (id={node.node_id}, status={node.status})")
-    
+
     return all_nodes
+
+
+async def get_nodes_simple(
+    panel_data: PanelType,
+    *,
+    timeout: float = 15.0,
+    enabled_only: bool = False,
+) -> list[dict] | ValueError:
+    """
+    Fetch a lightweight list of nodes from `/api/nodes/simple`.
+
+    Returns a list of `{id, name}` dicts. Cheaper than `get_nodes()` and
+    intended for dashboards, health checks, and configuration screens
+    that don't need the full node details.
+
+    Args:
+        panel_data:    Panel connection info.
+        timeout:       Per-request timeout in seconds.
+        enabled_only:  When True, only enabled nodes are returned.
+
+    Returns:
+        list of dicts with `id` and `name` keys.
+    """
+    nodes_logger.debug("🖥️ Fetching simple node list...")
+    endpoint = "/api/nodes/simple"
+    if enabled_only:
+        endpoint += "?enabled=true"
+
+    response = await panel_get(panel_data, endpoint, timeout=timeout, max_retries=2)
+    if response is None:
+        raise ValueError("Failed to fetch /api/nodes/simple")
+
+    if response.status_code >= 400:
+        nodes_logger.warning(
+            f"/api/nodes/simple returned {response.status_code}: {response.text[:120]}"
+        )
+        raise ValueError(f"/api/nodes/simple returned {response.status_code}")
+
+    try:
+        parsed = NodesResponse.from_json(response.json())
+    except Exception as exc:  # noqa: BLE001
+        nodes_logger.error(f"Failed to parse /api/nodes/simple: {exc}")
+        raise ValueError(f"Failed to parse /api/nodes/simple: {exc}")
+
+    return [
+        {"id": n.id, "name": n.name, "status": n.status, "enabled": n.enabled}
+        for n in parsed.nodes
+    ]

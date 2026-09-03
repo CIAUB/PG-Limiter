@@ -96,6 +96,9 @@ async def main():
         config_file["panel"]["username"],
         config_file["panel"]["password"],
         config_file["panel"]["domain"],
+        # PasarGuard v5+ API key (optional). When set, takes precedence
+        # over username/password at auth time.
+        panel_api_key=config_file["panel"].get("api_key") or None,
     )
     main_logger.info(f"✓ Panel configured: {config_file['panel']['domain']}")
     

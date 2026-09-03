@@ -17,12 +17,16 @@ class PanelType:
         panel_password (str): The password for the panel.
         panel_domain (str): The domain for the panel.
         panel_token (Optional[str]): The token for the panel. None if no token is provided.
+        panel_api_key (Optional[str]): Optional PasarGuard v5+ API key
+            (`pg_key_<uuid>`). When set, takes precedence over
+            username/password for authentication.
     """
 
     panel_username: str
     panel_password: str
     panel_domain: str
     panel_token: str | None = None
+    panel_api_key: str | None = None
 
 
 @dataclass
@@ -117,6 +121,11 @@ class UserType:
         group_ids (list[int] | None): Group IDs the user belongs to.
         online_at (str | None): Last online datetime from panel.
         admin_username (str | None): Admin username who owns this user.
+        # PasarGuard v5+ additions (all optional, backward-compatible)
+        user_id (int | None): Numeric user id from the panel.
+        subscription_url (str | None): Subscription URL (may be empty).
+        note (str | None): Free-form note attached to the user.
+        next_plan (dict | None): Next plan payload, if any.
     """
 
     name: str
@@ -133,6 +142,11 @@ class UserType:
     group_ids: list[int] | None = None
     online_at: str | None = None
     admin_username: str | None = None
+    # PasarGuard v5+ additions (NEW, optional)
+    user_id: int | None = None
+    subscription_url: str | None = None
+    note: str | None = None
+    next_plan: dict | None = None
 
 
 @dataclass

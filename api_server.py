@@ -13,6 +13,7 @@ from typing import AsyncGenerator, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Depends, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
 from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from pydantic import BaseModel
 import secrets
@@ -539,9 +540,10 @@ async def cleanup_deleted_users(username: str = Depends(verify_credentials)):
         panel_data = PanelType(
             panel_username=panel_config.get("username", ""),
             panel_password=panel_config.get("password", ""),
-            panel_domain=panel_config.get("domain", "")
+            panel_domain=panel_config.get("domain", ""),
+            panel_api_key=panel_config.get("api_key") or None,
         )
-        
+
         result = await do_cleanup(panel_data)
         
         total_removed = (
@@ -567,6 +569,209 @@ async def cleanup_deleted_users(username: str = Depends(verify_credentials)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Cleanup failed: {str(e)}"
         )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Bulk operations (NEW — PasarGuard v5+/PG-Limiter)
+# ═══════════════════════════════════════════════════════════════
+
+class BulkRequest(BaseModel):
+    usernames: List[str]
+
+
+class BulkResponse(BaseModel):
+    succeeded: List[str]
+    failed: List[str]
+    not_found: List[str]
+    total: int
+
+
+async def _build_panel_data() -> "PanelType":
+    """Helper that returns a `PanelType` populated from the live config."""
+    from utils.read_config import read_config
+    from utils.types import PanelType
+    config = await read_config()
+    panel_config = config.get("panel", {})
+    if not panel_config.get("domain"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Panel not configured",
+        )
+    return PanelType(
+        panel_username=panel_config.get("username", ""),
+        panel_password=panel_config.get("password", ""),
+        panel_domain=panel_config.get("domain", ""),
+        panel_api_key=panel_config.get("api_key") or None,
+    )
+
+
+@app.post(
+    "/users/bulk/disable",
+    response_model=BulkResponse,
+    tags=["Bulk"],
+    summary="Disable many users at once",
+)
+async def bulk_disable(
+    body: BulkRequest,
+    username: str = Depends(verify_credentials),
+):
+    """
+    Disable multiple users. Tries the native
+    `/api/users/bulk/disable` panel endpoint first, and falls back to
+    concurrent per-user PUTs if the panel doesn't support it.
+    """
+    if not body.usernames:
+        return BulkResponse(succeeded=[], failed=[], not_found=[], total=0)
+    from utils.panel_api import bulk_disable_users as api_bulk_disable
+
+    try:
+        panel = await _build_panel_data()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read config: {e}")
+
+    try:
+        result = await api_bulk_disable(panel, body.usernames)
+        d = result.as_dict()
+        return BulkResponse(
+            succeeded=d["succeeded"],
+            failed=d["failed"],
+            not_found=d["not_found"],
+            total=len(body.usernames),
+        )
+    except Exception as e:
+        logger.error(f"bulk_disable failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post(
+    "/users/bulk/enable",
+    response_model=BulkResponse,
+    tags=["Bulk"],
+    summary="Enable many users at once",
+)
+async def bulk_enable(
+    body: BulkRequest,
+    username: str = Depends(verify_credentials),
+):
+    """
+    Re-enable multiple users. Tries the native
+    `/api/users/bulk/enable` panel endpoint first, and falls back to
+    concurrent per-user PUTs if the panel doesn't support it.
+    """
+    if not body.usernames:
+        return BulkResponse(succeeded=[], failed=[], not_found=[], total=0)
+    from utils.panel_api import bulk_enable_users as api_bulk_enable
+
+    try:
+        panel = await _build_panel_data()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to read config: {e}")
+
+    try:
+        result = await api_bulk_enable(panel, body.usernames)
+        d = result.as_dict()
+        return BulkResponse(
+            succeeded=d["succeeded"],
+            failed=d["failed"],
+            not_found=d["not_found"],
+            total=len(body.usernames),
+        )
+    except Exception as e:
+        logger.error(f"bulk_enable failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ═══════════════════════════════════════════════════════════════
+# Dashboard (NEW — single-file, dependency-free)
+# ═══════════════════════════════════════════════════════════════
+
+class DashboardState(BaseModel):
+    generated_at: str
+    panel_domain: str
+    auth_mode: str  # "password" | "api_key"
+    config: dict
+    counts: dict
+    health: dict
+    recent_logs: List[str]
+
+
+@app.get("/dashboard", tags=["Dashboard"], response_class=HTMLResponse)
+async def dashboard_page(username: str = Depends(verify_credentials)):
+    """Return the single-file dashboard UI."""
+    try:
+        with open("api/dashboard.html", "r", encoding="utf-8") as fh:
+            return HTMLResponse(content= fh.read())
+    except FileNotFoundError:
+        return HTMLResponse(
+            content="<h1>api/dashboard.html missing</h1>",
+            status_code=500,
+        )
+
+
+@app.get(
+    "/api/dashboard/state",
+    response_model=DashboardState,
+    tags=["Dashboard"],
+    summary="Aggregated state for the dashboard UI",
+)
+async def dashboard_state(username: str = Depends(verify_credentials)):
+    """
+    Aggregate a JSON snapshot of the limiter for the dashboard UI.
+    Backed by the same files/config the CLI uses, plus panel health.
+    """
+    from utils.panel_api import get_panel_health
+
+    config = load_config()
+    panel_cfg = config.get("panel", {}) or {}
+    auth_mode = "api_key" if panel_cfg.get("api_key") else "password"
+
+    # Disabled users (uses the legacy JSON store, same as the CLI).
+    disabled: list[str] = []
+    try:
+        with open(DISABLED_USERS_FILE, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+            du = data.get("disabled_users") or data.get("disable_user") or {}
+            if isinstance(du, dict):
+                disabled = list(du.keys())
+            elif isinstance(du, list):
+                disabled = du
+    except FileNotFoundError:
+        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"dashboard: failed to read disabled users: {e}")
+
+    counts = {
+        "special_limits": len((config.get("limits") or {}).get("special") or {}),
+        "except_users": len(config.get("users", {}).get("except", []) or []),
+        "disabled_users": len(disabled),
+    }
+
+    return DashboardState(
+        generated_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+        panel_domain=panel_cfg.get("domain", ""),
+        auth_mode=auth_mode,
+        config={
+            "general_limit": (config.get("limits") or {}).get("general"),
+            "check_interval": config.get("timing", {}).get("check_interval")
+                or config.get("monitoring", {}).get("check_interval")
+                or config.get("check_interval"),
+            "time_to_active_users": config.get("timing", {}).get("time_to_active_users")
+                or config.get("time_to_active_users"),
+            "country_code": config.get("country_code"),
+        },
+        counts=counts,
+        health=get_panel_health(),
+        recent_logs=[],  # Could be wired to a ring buffer; left empty for now.
+    )
+
+
+# ═══════════════════════════════════════════════════════════════
+# Main
+# ═══════════════════════════════════════════════════════════════
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -1,0 +1,103 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pg-limiter"
+version = "1.0.0"
+description = "IP connection limiter for the PasarGuard panel"
+readme = "README.md"
+license = { text = "AGPL-3.0-or-later" }
+requires-python = ">=3.10"
+authors = [
+    # Fork maintainer — primary contact for issues on this fork.
+    { name = "CIAUB", email = "", url = "https://github.com/CIAUB" },
+]
+maintainers = [
+    { name = "CIAUB", email = "", url = "https://github.com/CIAUB" },
+]
+keywords = [
+    "pasarguard",
+    "limiter",
+    "vpn",
+    "xray",
+    "ip-connection",
+    "telegram-bot",
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: GNU Affero General Public License v3 or later (AGPLv3+)",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Internet :: WWW/HTTP :: HTTP Servers",
+    "Topic :: System :: Monitoring",
+]
+dependencies = [
+    "httpx==0.27.2",
+    "python-telegram-bot[job-queue]==21.10",
+    "aiohttp<=4",
+    "ipinfo==5.1.1",
+    "requests",
+    "cachetools",
+    "typer[all]>=0.9.8",
+    "rich>=13.0.0",
+    "fastapi>=0.109.0",
+    "uvicorn>=0.27.0",
+    "sqlalchemy[asyncio]>=2.0.0",
+    "aiosqlite>=0.19.0",
+    "alembic>=1.13.0",
+    "redis>=5.0.0",
+]
+
+[project.urls]
+# This fork
+Homepage = "https://github.com/CIAUB/PG-Limiter"
+Repository = "https://github.com/CIAUB/PG-Limiter"
+Issues = "https://github.com/CIAUB/PG-Limiter/issues"
+Changelog = "https://github.com/CIAUB/PG-Limiter/blob/main/CHANGELOG.md"
+Credits = "https://github.com/CIAUB/PG-Limiter/blob/main/CREDITS.md"
+
+# Upstream (preserved per fork policy)
+"Upstream Home"   = "https://github.com/MatinDehghanian/PG-Limiter"
+"Upstream Issues" = "https://github.com/MatinDehghanian/PG-Limiter/issues"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Original author
+# ─────────────────────────────────────────────────────────────────────────────
+# MatinDehghanian is the original author of PG-Limiter (up to v0.9.8). This
+# fork is maintained by CIAUB; see CREDITS.md and NOTICE for the full
+# attribution history. The original author is recorded in:
+#
+#   1. The "Original-Author" / "Original-Project" URLs above.
+#   2. The `[tool.pg-limiter]` table below, which is consumed by
+#      nothing in-tree but documents the relationship for anyone who
+#      greps the source.
+
+[tool.pg-limiter]
+original-author = "MatinDehghanian"
+original-author-url = "https://github.com/MatinDehghanian"
+original-project = "MatinDehghanian/PG-Limiter"
+original-project-url = "https://github.com/MatinDehghanian/PG-Limiter"
+fork-maintainer = "CIAUB"
+fork-maintainer-url = "https://github.com/CIAUB"
+fork-project = "CIAUB/PG-Limiter"
+fork-project-url = "https://github.com/CIAUB/PG-Limiter"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Tooling
+# ─────────────────────────────────────────────────────────────────────────────
+
+[tool.setuptools]
+# We don't ship a setuptools package, but the metadata is still useful
+# to consumers (IDE import resolvers, `pip show pg-limiter`, etc.).
+py-modules = []
+
+[tool.ruff]
+# Delegate to ruff.toml at the repo root.
+target-version = "py310"
